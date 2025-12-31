@@ -47,6 +47,10 @@ int main(void) {
   while (!WindowShouldClose()) {
     // Update
     //----------------------------------------------------------------------------------
+    if (IsKeyPressed(KEY_Q) &&
+        (IsKeyPressed(KEY_LEFT_SUPER) || IsKeyPressed(KEY_RIGHT_SUPER))) {
+      break;
+    }
     if (IsFileDropped()) {
       FilePathList droppedFiles = LoadDroppedFiles();
 

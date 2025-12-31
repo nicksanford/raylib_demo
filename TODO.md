@@ -1,6 +1,6 @@
 - [x] Add code to git
 - [x] See if you can get raygui working
-- [ ] Make cancel button work
-- [ ] Make cmd q work
+- [x] Make cmd q work
+- [ ] Render an image
 - [ ] Add ffmpeg
-- [ ] Feed data into ffmpeg, get text out
+- [ ] Feed video into ffmpeg, get frames out
