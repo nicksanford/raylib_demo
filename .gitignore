@@ -1,3 +1,6 @@
 bin
 .cache
 raylib
+build
+.DS_Store
+**/*.o

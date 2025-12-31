@@ -17,12 +17,13 @@
  ********************************************************************************************/
 
 #include "raylib.h"
+#include <assert.h>
 #define RAYGUI_IMPLEMENTATION
 #include "raygui.h"
 
+#include "bstrlib-1.0.0/bstrlib.h"
 #include <stdio.h>
 #include <stdlib.h> // Required for: calloc(), free()
-#define MAX_FILEPATH_RECORDED 4096
 #define MAX_FILEPATH_SIZE 2048
 
 //------------------------------------------------------------------------------------
@@ -34,62 +35,54 @@ int main(void) {
   const int screenWidth = 800;
   const int screenHeight = 450;
 
-  InitWindow(screenWidth, screenHeight, "raylib [core] example - drop files");
-
-  int filePathCounter = 0;
-  char *filePaths[MAX_FILEPATH_RECORDED] = {
-      0}; // We will register a maximum of filepaths
+  InitWindow(screenWidth, screenHeight, "raylib [core] example - drop a file");
+  const bstring str = bfromcstr("");
 
   // Allocate space for the required file paths
-  for (int i = 0; i < MAX_FILEPATH_RECORDED; i++) {
-    filePaths[i] = (char *)RL_CALLOC(MAX_FILEPATH_SIZE, 1);
-  }
 
   SetTargetFPS(60); // Set our game to run at 60 frames-per-second
   //--------------------------------------------------------------------------------------
 
   // Main game loop
-  Vector2 mousePosition = {-100.0f, -100.0f};
-  Rectangle transcribeButtonRect = {
-      .x = 400 - 25, // Rectangle top-left corner position x
-      .y = 200,      // Rectangle top-left corner position y
-      .width = 80,   // Rectangle width
-      .height = 50,  // Rectangle height
-  };
-  Rectangle cancelButtonRect = {
-      .x = 400 - 25 -
-           transcribeButtonRect.width, // Rectangle top-left corner position x
-      .y = 200,                        // Rectangle top-left corner position y
-      .width = 80,                     // Rectangle width
-      .height = 50,                    // Rectangle height
-  };
-  while (!WindowShouldClose()) // Detect window close button or ESC key
-  {
+  // Vector2 mousePosition = {-100.0f, -100.0f};
+  // Rectangle transcribeButtonRect = {
+  //     .x = 400 - 25, // Rectangle top-left corner position x
+  //     .y = 200,      // Rectangle top-left corner position y
+  //     .width = 80,   // Rectangle width
+  //     .height = 50,  // Rectangle height
+  // };
+  // Rectangle cancelButtonRect = {
+  // } //     .x = 400 - 25 -
+  //          transcribeButtonRect.width, // Rectangle top-left corner position
+  //          x
+  //     .y = 200,                        // Rectangle top-left corner position
+  //     y .width = 80,                     // Rectangle width .height = 50, //
+  //     Rectangle height
+  // };
+  //
+  // Detect window close button or ESC key
+  while (!WindowShouldClose()) {
     // Update
     //----------------------------------------------------------------------------------
     if (IsFileDropped()) {
       FilePathList droppedFiles = LoadDroppedFiles();
 
-      for (int i = 0, offset = filePathCounter; i < (int)droppedFiles.count;
-           i++) {
-        if (filePathCounter < (MAX_FILEPATH_RECORDED - 1)) {
-          TextCopy(filePaths[offset + i], droppedFiles.paths[i]);
-          filePathCounter++;
-        }
+      if (droppedFiles.count > 0) {
+        assert(bassigncstr(str, droppedFiles.paths[0]) == BSTR_OK);
       }
 
       UnloadDroppedFiles(droppedFiles); // Unload filepaths from
     }
 
-    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-      mousePosition = GetMousePosition();
-      if (CheckCollisionPointRec(mousePosition, transcribeButtonRect)) {
-        DrawRectangle(transcribeButtonRect.x, transcribeButtonRect.y,
-                      transcribeButtonRect.width, transcribeButtonRect.height,
-                      GREEN);
-        printf("pressed\n");
-      }
-    }
+    // if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+    //   mousePosition = GetMousePosition();
+    //   if (CheckCollisionPointRec(mousePosition, transcribeButtonRect)) {
+    //     DrawRectangle(transcribeButtonRect.x, transcribeButtonRect.y,
+    //                   transcribeButtonRect.width,
+    //                   transcribeButtonRect.height, GREEN);
+    //     printf("pressed\n");
+    //   }
+    // }
     //----------------------------------------------------------------------------------
 
     // Draw
@@ -98,45 +91,37 @@ int main(void) {
 
     ClearBackground(RAYWHITE);
 
-    if (filePathCounter == 0)
-      DrawText("Drop your files to this window!", 100, 40, 20, DARKGRAY);
-    else {
+    if (str->slen == 0) {
+      DrawText("Drop your file into this window!", 100, 40, 20, DARKGRAY);
+    } else {
       DrawText("Dropped files:", 100, 40, 20, DARKGRAY);
 
-      for (int i = 0; i < filePathCounter; i++) {
-        if (i % 2 == 0)
-          DrawRectangle(0, 85 + 40 * i, screenWidth, 40, Fade(LIGHTGRAY, 0.5f));
-        else
-          DrawRectangle(0, 85 + 40 * i, screenWidth, 40, Fade(LIGHTGRAY, 0.3f));
+      DrawRectangle(0, 85, screenWidth, 40, Fade(LIGHTGRAY, 0.5f));
 
-        DrawText(filePaths[i], 120, 100 + 40 * i, 10, GRAY);
-      }
-
-      DrawText("Drop new files...", 100, 110 + 40 * filePathCounter, 20,
-               DARKGRAY);
-      DrawRectangle(transcribeButtonRect.x, transcribeButtonRect.y,
-                    transcribeButtonRect.width, transcribeButtonRect.height,
-                    GREEN);
-      DrawText("Transcribe", transcribeButtonRect.x + 10,
-               transcribeButtonRect.y + 20, 10, BLACK);
-      DrawRectangle(cancelButtonRect.x, cancelButtonRect.y,
-                    cancelButtonRect.width, cancelButtonRect.height, RED);
-      DrawText("Cancel", cancelButtonRect.x + 21, cancelButtonRect.y + 20, 10,
-               BLACK);
+      DrawText((const char *)str->data, 120, 100, 10, GRAY);
     }
+
+    // DrawText("Drop new files...", 100, 110, 20, DARKGRAY);
+    // DrawRectangle(transcribeButtonRect.x, transcribeButtonRect.y,
+    //               transcribeButtonRect.width, transcribeButtonRect.height,
+    //               GREEN);
+    // DrawText("Transcribe", transcribeButtonRect.x + 10,
+    //          transcribeButtonRect.y + 20, 10, BLACK);
+    // DrawRectangle(cancelButtonRect.x, cancelButtonRect.y,
+    //               cancelButtonRect.width, cancelButtonRect.height, RED);
+    // DrawText("Cancel", cancelButtonRect.x + 21, cancelButtonRect.y + 20, 10,
+    //          BLACK);
 
     EndDrawing();
     //----------------------------------------------------------------------------------
-  }
 
-  // De-Initialization
-  //--------------------------------------------------------------------------------------
-  for (int i = 0; i < MAX_FILEPATH_RECORDED; i++) {
-    RL_FREE(filePaths[i]); // Free allocated memory for all filepaths
+    // De-Initialization
+    //--------------------------------------------------------------------------------------
+    // for (int i = 0; i < MAX_FILEPATH_RECORDED; i++) {
+    //--------------------------------------------------------------------------------------
   }
+  // RL_FREE(filePath); // Free allocated memory for all filepaths
 
   CloseWindow(); // Close window and OpenGL context
-  //--------------------------------------------------------------------------------------
-
   return 0;
 }
