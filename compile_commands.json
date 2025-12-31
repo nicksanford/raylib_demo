@@ -1,0 +1,8 @@
+[
+  {
+    "directory": "/Users/nicksanford/code/raylib_demo",
+    "command": "/usr/bin/cc std=c23 -O1 -Wall -Wextra -Wpedantic -Wnull-dereference -Wdouble-promotion  -Wshadow -Wunused -Wenum-conversion -Wuninitialized -Werror -Wno-unused-function -Wno-unused-command-line-argument -Wno-unused-parameter -Wno-sign-conversion  -Wno-switch-enum -Wno-signed-enum-bitfield -Wno-assign-enum -g -fdata-sections -ffunction-sections -fno-omit-frame-pointer -fsanitize-address-use-after-scope -fsanitize-address-use-odr-indicator -fsanitize-cfi-cross-dso -fno-common -ggdb -fsanitize=address -fsanitize-address-use-after-scope  -fsanitize-address-use-after-return=always -fno-omit-frame-pointer -I./raylib/src -framework CoreVideo -framework Cocoa -framework IOKit -framework GLUT -framework OpenGL ./raylib/build/raylib/libraylib.a /Users/nicksanford/code/raylib_demo/scribe.c -o /Users/nicksanford/code/raylib_demo/bin/Darwin-arm64/scribe",
+    "file": "/Users/nicksanford/code/raylib_demo/scribe.c",
+    "output": "/Users/nicksanford/code/raylib_demo/bin/Darwin-arm64/scribe"
+  }
+]
