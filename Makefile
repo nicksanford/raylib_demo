@@ -43,7 +43,7 @@ raygui.h:
 	wget https://raw.githubusercontent.com/raysan5/raygui/refs/heads/master/src/raygui.h
 
 raylib:
-	git clone https://github.com/raysan5/raylib.git --depth 1
+	git submodule update --init
 
 clean:
 	@rm -rf bin build $(BSTR_OBJECTS) && cd raylib/src && make clean 
