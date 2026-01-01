@@ -30,9 +30,9 @@ endif
 
 .PHONY: scribe clean
 
-INCLUDES := $(wildcard build/include/*)
-scribe: LDFLAGS += $(INCLUDES:%=-I%)	
 scribe: build $(BSTR_TARGET) $(RAYLIB_TARGET) scribe.c 
+	$(eval INCLUDES = $(wildcard build/include/*))
+	$(eval LDFLAGS += $(INCLUDES:%=-I%)	)
 	$(CC) -std=c23 -O1 $(CFLAGS) $(LDFLAGS) $(BSTR_TARGET) $(RAYLIB_TARGET) scribe.c -o $(BIN_OUTPUT_PATH)/scribe
 
 build:
@@ -96,5 +96,7 @@ FFmpeg:
 	git submodule update --init
 
 clean:
-	@rm -rf bin build $(BSTR_OBJECTS) && cd raylib/src && make clean 
+	@rm -rf bin build $(BSTR_OBJECTS) 
+	cd raylib/src && make clean 
+	cd FFmpeg && make clean
 
