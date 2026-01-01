@@ -57,6 +57,9 @@ int main(void) {
       if (droppedFiles.count > 0) {
         assert(bassigncstr(filepath, droppedFiles.paths[0]) == BSTR_OK);
       }
+      if (IsTextureValid(texture)) {
+        UnloadTexture(texture);
+      }
 
       texture = LoadTexture((const char *)filepath->data);
       fileProvided = true;
@@ -70,10 +73,10 @@ int main(void) {
 
     ClearBackground(RAYWHITE);
 
-    if (texture.id == 0 && !fileProvided) {
+    if (!IsTextureValid(texture) && !fileProvided) {
       // file is not a valid image
       DrawText("Drop your file into this window.", 100, 40, 20, DARKGRAY);
-    } else if (texture.id == 0) {
+    } else if (!IsTextureValid(texture)) {
       DrawText("That is not a valid file type.", 100, 40, 20, DARKGRAY);
       DrawText("Drop your file into this window.", 100, 60, 20, DARKGRAY);
     } else {
