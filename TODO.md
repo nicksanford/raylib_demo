@@ -1,6 +1,6 @@
 - [x] Add code to git
 - [x] See if you can get raygui working
 - [x] Make cmd q work
-- [ ] Render an image
+- [x] Render an image
 - [ ] Add ffmpeg
 - [ ] Feed video into ffmpeg, get frames out

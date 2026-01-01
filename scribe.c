@@ -32,17 +32,17 @@
 int main(void) {
   // Initialization
   //--------------------------------------------------------------------------------------
-  const int screenWidth = 800;
-  const int screenHeight = 450;
+  const int windowWidth = 800;
+  const int windowHeight = 450;
+  bool fileProvided = false;
 
-  InitWindow(screenWidth, screenHeight, "raylib [core] example - drop a file");
+  InitWindow(windowWidth, windowHeight,
+             "raylib [core] example - drop an image file");
   const bstring filepath = bfromcstr("");
-
-  // Allocate space for the required file paths
 
   SetTargetFPS(60); // Set our game to run at 60 frames-per-second
   //--------------------------------------------------------------------------------------
-
+  Texture2D texture = {0};
   // Detect window close button or ESC key
   while (!WindowShouldClose()) {
     // Update
@@ -58,6 +58,9 @@ int main(void) {
         assert(bassigncstr(filepath, droppedFiles.paths[0]) == BSTR_OK);
       }
 
+      texture = LoadTexture((const char *)filepath->data);
+      fileProvided = true;
+
       UnloadDroppedFiles(droppedFiles); // Unload filepaths from
     }
 
@@ -67,12 +70,16 @@ int main(void) {
 
     ClearBackground(RAYWHITE);
 
-    if (filepath->slen == 0) {
-      DrawText("Drop your file into this window!", 100, 40, 20, DARKGRAY);
+    if (texture.id == 0 && !fileProvided) {
+      // file is not a valid image
+      DrawText("Drop your file into this window.", 100, 40, 20, DARKGRAY);
+    } else if (texture.id == 0) {
+      DrawText("That is not a valid file type.", 100, 40, 20, DARKGRAY);
+      DrawText("Drop your file into this window.", 100, 60, 20, DARKGRAY);
     } else {
-      DrawText("Dropped file:", 100, 40, 20, DARKGRAY);
-      DrawRectangle(0, 85, screenWidth, 40, Fade(LIGHTGRAY, 0.5f));
-      DrawText((const char *)filepath->data, 120, 100, 10, GRAY);
+      // file is a valid image
+      SetWindowSize(texture.width, texture.height);
+      DrawTexture(texture, 0, 0, WHITE);
     }
 
     EndDrawing();
