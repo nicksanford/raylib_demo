@@ -1,3 +1,6 @@
 [submodule "raylib"]
 	path = raylib
 	url = git@github.com:raysan5/raylib.git
+[submodule "FFmpeg"]
+	path = FFmpeg
+	url = git@github.com:FFmpeg/FFmpeg.git
