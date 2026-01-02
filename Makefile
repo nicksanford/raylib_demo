@@ -48,9 +48,11 @@ scribe: LDFLAGS += -Ibuild/include
 scribe: build $(BSTR_TARGET) $(RAYLIB_TARGET) $(FFMPEG_TARGET) scribe.c 
 	$(CC) -std=c23 -O1 $(CFLAGS) $(LDFLAGS) $(wildcard build/lib/*.a) scribe.c -o $(BIN_OUTPUT_PATH)/scribe
 
-build:
-	git submodule update --init
+bin:
 	mkdir -p $(BIN_OUTPUT_PATH)
+
+build: bin
+	git submodule update --init
 	mkdir -p build/include 
 	mkdir -p build/lib
 	mkdir -p build/share

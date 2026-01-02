@@ -32,7 +32,12 @@
  */
 
 #include "libavcodec/codec.h"
+#include "libavcodec/packet.h"
+#include "libavutil/error.h"
+#include "libavutil/log.h"
 #include "libavutil/pixfmt.h"
+#include <assert.h>
+#include <stdbool.h>
 #include <stdio.h>
 
 #include <libavcodec/avcodec.h>
@@ -44,43 +49,51 @@
 #include <libavutil/opt.h>
 #include <libavutil/pixdesc.h>
 #include <libswscale/swscale.h>
+#include <stdlib.h>
 #include <string.h>
 
-// static AVBufferRef *hw_device_ctx = NULL;
-// static enum AVPixelFormat hw_pix_fmt;
-static FILE *output_file = NULL;
+#define SCRIBE_SOURCE_PIX_FMT AV_PIX_FMT_YUV420P
+#define SCRIBE_TARGET_PIX_FMT AV_PIX_FMT_RGBA
 
-// static int hw_decoder_init(AVCodecContext *ctx,
-//                            const enum AVHWDeviceType type) {
-//   int err = 0;
+typedef struct Image {
+  void *data;  // Image raw data
+  int width;   // Image base width
+  int height;  // Image base height
+  int mipmaps; // Mipmap levels, 1 by default
+  int format;  // Data format (PixelFormat type)
+} Image;
+
+typedef struct scribe_decoder_ctx {
+  AVFormatContext *input_ctx;
+  int video_stream;
+  AVStream *video;
+  AVCodecContext *decoder_ctx;
+  AVPacket *packet;
+
+  AVFrame *yuv_frame;
+  AVFrame *rgba_frame;
+  uint8_t *buffer;
+  int buffer_size;
+
+  SwsContext *sws_ctx;
+} scribe_decoder_ctx;
+
+// int convert_to_rgba(AVFrame *src, AVFrame *dst) {
+//   SwsContext *sws_ctx = sws_getContext(
+//       src->width, src->height, src->format, src->width, src->height,
+//       SCRIBE_TARGET_PIX_FMT, SWS_BILINEAR, NULL, NULL, NULL);
 //
-//   if ((err = av_hwdevice_ctx_create(&hw_device_ctx, type, NULL, NULL, 0)) <
-//   0) {
-//     fprintf(stderr, "Failed to create specified HW device.\n");
-//     return err;
+//   if (!sws_ctx) {
+//     return -1;
 //   }
-//   ctx->hw_device_ctx = av_buffer_ref(hw_device_ctx);
 //
-//   return err;
+//   int ret = sws_scale_frame(sws_ctx, dst, src);
+//
+//   sws_freeContext(sws_ctx);
+//
+//   return ret >= 0 ? 0 : -1;
 // }
-//
 
-int convert_yuv420_to_rgba(AVFrame *src, // AV_PIX_FMT_YUV420P
-                           AVFrame *dst  // AV_PIX_FMT_RGBA
-) {
-  struct SwsContext *sws_ctx = sws_getContext(
-      src->width, src->height, AV_PIX_FMT_YUV420P, src->width, src->height,
-      AV_PIX_FMT_RGBA, SWS_BILINEAR, NULL, NULL, NULL);
-
-  if (!sws_ctx)
-    return -1;
-
-  int ret = sws_scale_frame(sws_ctx, dst, src);
-
-  sws_freeContext(sws_ctx);
-
-  return ret >= 0 ? 0 : -1;
-}
 static enum AVPixelFormat get_format(AVCodecContext *ctx,
                                      const enum AVPixelFormat *pix_fmts) {
   const enum AVPixelFormat *p;
@@ -90,191 +103,285 @@ static enum AVPixelFormat get_format(AVCodecContext *ctx,
     av_get_pix_fmt_string(str, sizeof(str), *p);
     printf("option: %s\n", str);
     bzero(str, sizeof(str));
-    if (*p == AV_PIX_FMT_YUV420P)
+    if (*p == SCRIBE_SOURCE_PIX_FMT) {
       return *p;
+    }
   }
 
   fprintf(stderr, "Failed to get HW surface format.\n");
   return AV_PIX_FMT_NONE;
 }
 
-static int decode_write(AVCodecContext *avctx, AVPacket *packet) {
-  AVFrame *yuv_frame = NULL;
-  AVFrame *rgba_frame = NULL;
-  uint8_t *buffer = NULL;
-  int size;
-  int ret = 0;
-
-  ret = avcodec_send_packet(avctx, packet);
-  if (ret < 0) {
-    fprintf(stderr, "Error during decoding\n");
-    return ret;
-  }
-
-  char buf[3000] = {0};
+/**
+ * decode_to_buffer
+ *
+ * returns 0 when done
+ *
+ * returns 1 when buffer is ready to read
+ *
+ * returns other negative number on unrecoverable error
+ **/
+static int decode_to_buffer(scribe_decoder_ctx *ctx) {
+  int err = 0;
+  // char buf[3000] = {0};
   while (1) {
-    if (!(yuv_frame = av_frame_alloc()) || !(rgba_frame = av_frame_alloc())) {
-      fprintf(stderr, "Can not alloc frame\n");
-      ret = AVERROR(ENOMEM);
-      goto fail;
+    if ((err = av_read_frame(ctx->input_ctx, ctx->packet)) < 0) {
+      fprintf(stderr, "Failed to read frame, err: %s\n", av_err2str(err));
+      return err;
     }
 
-    ret = avcodec_receive_frame(avctx, yuv_frame);
-    if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
-      av_frame_free(&yuv_frame);
-      av_frame_free(&rgba_frame);
+    if (ctx->video_stream != ctx->packet->stream_index) {
+      continue;
+    }
+
+    // printf("\n");
+    // printf("\n");
+    // printf("-----------\n");
+    // printf("ctx->video_stream: %d ctx->packet->stream_index: %d, pts %lld, "
+    //        "pos: %lld, flags: %d\n",
+    //        ctx->video_stream, ctx->packet->stream_index, ctx->packet->pts,
+    //        ctx->packet->pos, ctx->packet->flags);
+    // AVStream *video = ctx->input_ctx->streams[ctx->video_stream];
+    // printf("video_index: %d\n", video->index);
+    // printf("video_id: %d\n", video->id);
+    // printf("avg_frame_rate: %d/%d\n", video->avg_frame_rate.num,
+    //        video->avg_frame_rate.den);
+    // printf("duration: %lld\n", video->duration);
+    // printf("width: %d, height: %d, codec_id: %d, format: %d\n",
+    //        video->codecpar->width, video->codecpar->height,
+    //        video->codecpar->codec_id, video->codecpar->format);
+    // printf("-----------\n");
+
+    if ((err = avcodec_send_packet(ctx->decoder_ctx, ctx->packet)) < 0) {
+      fprintf(stderr, "Error decoding packet: err: %s\n", av_err2str(err));
+      return err;
+    }
+    av_packet_unref(ctx->packet);
+
+    err = avcodec_receive_frame(ctx->decoder_ctx, ctx->yuv_frame);
+    if (err == AVERROR_EOF) {
+      fprintf(stderr, "done, err: %s\n", av_err2str(err));
       return 0;
-    } else if (ret < 0) {
-      fprintf(stderr, "Error while decoding\n");
-      goto fail;
+    } else if (err == AVERROR(EAGAIN)) {
+      // need more data
+      // TEST
+      fprintf(stderr, "need more data to receive frame, err: %s\n",
+              av_err2str(err));
+      continue;
+    } else if (err < 0) {
+      // decoder error
+      fprintf(stderr, "Error while decoding, err: %s\n", av_err2str(err));
+      return err;
     }
-    printf("frame format: %s\n",
-           av_get_pix_fmt_string(buf, sizeof(buf), yuv_frame->format));
-    bzero(buf, sizeof(buf));
+    // otherwise err == 0 which is a success and we have a frame
 
-    if (convert_yuv420_to_rgba(yuv_frame, rgba_frame) != 0) {
-      fprintf(stderr, "Error while converting from yuv420 to rgba\n");
-      goto fail;
-    }
+    // printf("frame format: %s\n",
+    //        av_get_pix_fmt_string(buf, sizeof(buf),
+    //        ctx->yuv_frame->format));
+    // bzero(buf, sizeof(buf));
 
-    size = av_image_get_buffer_size(rgba_frame->format, rgba_frame->width,
-                                    rgba_frame->height, 1);
-    buffer = av_malloc(size);
-    if (!buffer) {
-      fprintf(stderr, "Can not alloc buffer\n");
-      ret = AVERROR(ENOMEM);
-      goto fail;
-    }
-    ret = av_image_copy_to_buffer(
-        buffer, size, (const uint8_t *const *)rgba_frame->data,
-        (const int *)rgba_frame->linesize, rgba_frame->format,
-        rgba_frame->width, rgba_frame->height, 1);
-    if (ret < 0) {
-      fprintf(stderr, "Can not copy image to buffer\n");
-      goto fail;
+    if ((err = sws_scale_frame(ctx->sws_ctx, ctx->rgba_frame, ctx->yuv_frame)) <
+        0) {
+      fprintf(stderr, "Error while converting from yuv420 to rgba: %s\n",
+              av_err2str(err));
+      return err;
     }
 
-    if ((ret = fwrite(buffer, 1, size, output_file)) < 0) {
-      fprintf(stderr, "Failed to dump raw data.\n");
-      goto fail;
+    if ((err = av_image_copy_to_buffer(
+             ctx->buffer, ctx->buffer_size,
+             (const uint8_t *const *)ctx->rgba_frame->data,
+             (const int *)ctx->rgba_frame->linesize, ctx->rgba_frame->format,
+             ctx->rgba_frame->width, ctx->rgba_frame->height, 1)) < 0) {
+      fprintf(stderr, "Can not copy image to buffer, err: %s\n",
+              av_err2str(err));
+      return err;
     }
-
-  fail:
-    av_frame_free(&yuv_frame);
-    av_frame_free(&rgba_frame);
-    av_freep(&buffer);
-    if (ret < 0)
-      return ret;
+    return 1;
   }
 }
+void scribe_decoder_ctx_free(scribe_decoder_ctx **p_ctx) {
+  assert(p_ctx != NULL);
+  assert(*p_ctx != NULL);
 
-int main(int argc, char *argv[]) {
-  AVFormatContext *input_ctx = NULL;
-  int video_stream, ret;
-  AVStream *video = NULL;
-  AVCodecContext *decoder_ctx = NULL;
-  const AVCodec *decoder = NULL;
-  AVPacket *packet = NULL;
-  // enum AVHWDeviceType type;
-  // int i;
-
-  if (argc < 3) {
-    fprintf(stderr, "Usage: %s <input file> <output file>\n", argv[0]);
-    return -1;
+  if ((*p_ctx)->packet) {
+    av_packet_free(&(*p_ctx)->packet);
   }
 
-  // avcodec_find_decoder(enum AVCodecID id)
-  // type = av_hwdevice_find_type_by_name(argv[1]);
-  // if (type == AV_HWDEVICE_TYPE_NONE) {
-  //   fprintf(stderr, "Device type %s is not supported.\n", argv[1]);
-  //   fprintf(stderr, "Available device types:");
-  //   while ((type = av_hwdevice_iterate_types(type)) !=
-  //   AV_HWDEVICE_TYPE_NONE)
-  //     fprintf(stderr, " %s", av_hwdevice_get_type_name(type));
-  //   fprintf(stderr, "\n");
-  //   return -1;
-  // }
-  //
-  packet = av_packet_alloc();
-  if (!packet) {
+  if ((*p_ctx)->input_ctx) {
+    avformat_close_input(&(*p_ctx)->input_ctx);
+  }
+
+  if ((*p_ctx)->decoder_ctx) {
+    avcodec_free_context(&(*p_ctx)->decoder_ctx);
+  }
+
+  if ((*p_ctx)->yuv_frame) {
+    av_frame_free(&(*p_ctx)->yuv_frame);
+  }
+
+  if ((*p_ctx)->rgba_frame) {
+    av_frame_free(&(*p_ctx)->rgba_frame);
+  }
+
+  if ((*p_ctx)->buffer) {
+    av_freep(&(*p_ctx)->buffer);
+  }
+
+  if ((*p_ctx)->sws_ctx) {
+    sws_freeContext((*p_ctx)->sws_ctx);
+  }
+
+  free(*p_ctx);
+  *p_ctx = NULL;
+}
+
+scribe_decoder_ctx *scribe_decoder_ctx_alloc(void) {
+  return calloc(1, sizeof(scribe_decoder_ctx));
+}
+
+int scribe_decoder_ctx_init(scribe_decoder_ctx **p_ctx, // OUT
+                            char *filename) {
+  scribe_decoder_ctx *ctx = *p_ctx;
+  int err = 0;
+  AVStream *video = NULL;
+  const AVCodec *decoder = NULL;
+  if (!(ctx = scribe_decoder_ctx_alloc())) {
+    fprintf(stderr, "Failed to allocate scribe_decoder_ctx\n");
+    goto fail;
+  };
+  if (!(ctx->packet = av_packet_alloc())) {
     fprintf(stderr, "Failed to allocate AVPacket\n");
-    return -1;
+    goto fail;
   }
 
   /* open the input file */
-  if (avformat_open_input(&input_ctx, argv[2], NULL, NULL) != 0) {
-    fprintf(stderr, "Cannot open input file '%s'\n", argv[2]);
-    return -1;
+  if ((err = avformat_open_input(&ctx->input_ctx, filename, NULL, NULL))) {
+    fprintf(stderr, "Cannot open input file '%s', err: %s\n", filename,
+            av_err2str(err));
+    goto fail;
   }
 
-  if (avformat_find_stream_info(input_ctx, NULL) < 0) {
-    fprintf(stderr, "Cannot find input stream information.\n");
-    return -1;
+  if ((err = avformat_find_stream_info(ctx->input_ctx, NULL)) < 0) {
+    fprintf(stderr, "Cannot find input stream information. %s\n",
+            av_err2str(err));
+    goto fail;
   }
 
   /* find the video stream information */
-  ret = av_find_best_stream(input_ctx, AVMEDIA_TYPE_VIDEO, -1, -1, &decoder, 0);
-  if (ret < 0) {
-    fprintf(stderr, "Cannot find a video stream in the input file\n");
-    return -1;
+  if ((err = av_find_best_stream(ctx->input_ctx, AVMEDIA_TYPE_VIDEO, -1, -1,
+                                 &decoder, 0)) < 0) {
+    fprintf(stderr, "Cannot find a video stream in the input file: %s\n",
+            av_err2str(err));
+    goto fail;
   }
-  video_stream = ret;
+  ctx->video_stream = err;
+  printf("best stream: %d\n", ctx->video_stream);
 
-  // for (i = 0;; i++) {
-  //   const AVCodecHWConfig *config = avcodec_get_hw_config(decoder, i);
-  //   if (!config) {
-  //     fprintf(stderr, "Decoder %s does not support device type %s.\n",
-  //             decoder->name, av_hwdevice_get_type_name(type));
-  //     return -1;
-  //   }
-  //   if (config->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX &&
-  //       config->device_type == type) {
-  //     hw_pix_fmt = config->pix_fmt;
-  //     break;
-  //   }
-  // }
-
-  if (!(decoder_ctx = avcodec_alloc_context3(decoder)))
-    return AVERROR(ENOMEM);
-
-  video = input_ctx->streams[video_stream];
-  if (avcodec_parameters_to_context(decoder_ctx, video->codecpar) < 0)
-    return -1;
-
-  decoder_ctx->get_format = get_format;
-
-  // if (hw_decoder_init(decoder_ctx, type) < 0)
-  //   return -1;
-
-  if ((ret = avcodec_open2(decoder_ctx, decoder, NULL)) < 0) {
-    fprintf(stderr, "Failed to open codec for stream #%u\n", video_stream);
-    return -1;
+  if (!(ctx->decoder_ctx = avcodec_alloc_context3(decoder))) {
+    fprintf(stderr, "Cannot allocate decoder context\n");
+    goto fail;
   }
 
-  /* open the file to dump raw data */
-  output_file = fopen(argv[3], "w+b");
+  video = ctx->input_ctx->streams[ctx->video_stream];
+  printf("video_index: %d\n", video->index);
+  printf("video_id: %d\n", video->id);
+  printf("avg_frame_rate: %d/%d\n", video->avg_frame_rate.num,
+         video->avg_frame_rate.den);
+  printf("duration: %lld\n", video->duration);
+  printf("width: %d, height: %d, codec_id: %d, format: %d\n",
+         video->codecpar->width, video->codecpar->height,
+         video->codecpar->codec_id, video->codecpar->format);
+  // exit(1);
+  if ((err = avcodec_parameters_to_context(ctx->decoder_ctx, video->codecpar)) <
+      0) {
+    fprintf(stderr, "Cannot get codec parameters from decoder context: %s\n",
+            av_err2str(err));
+    goto fail;
+  }
+
+  ctx->decoder_ctx->get_format = get_format;
+  if ((err = avcodec_open2(ctx->decoder_ctx, decoder, NULL)) < 0) {
+    fprintf(stderr, "Failed to open codec for stream #%u, err: %s\n",
+            ctx->video_stream, av_err2str(err));
+    goto fail;
+  }
+
+  if (!(ctx->yuv_frame = av_frame_alloc()) ||
+      !(ctx->rgba_frame = av_frame_alloc())) {
+    fprintf(stderr, "Can not alloc frame\n");
+    goto fail;
+  }
+
+  if ((err = av_image_get_buffer_size(SCRIBE_TARGET_PIX_FMT,
+                                      video->codecpar->width,
+                                      video->codecpar->height, 1)) < 0) {
+    fprintf(stderr, "Failed to comupte buffer size: err: %s\n",
+            av_err2str(err));
+    goto fail;
+  }
+  ctx->buffer_size = err;
+
+  if (!(ctx->buffer = av_malloc(ctx->buffer_size))) {
+    fprintf(stderr, "Can not alloc buffer\n");
+    goto fail;
+  }
+
+  if (!(ctx->sws_ctx =
+            sws_getContext(video->codecpar->width, video->codecpar->height,
+                           SCRIBE_SOURCE_PIX_FMT, video->codecpar->width,
+                           video->codecpar->height, SCRIBE_TARGET_PIX_FMT,
+                           SWS_BILINEAR, NULL, NULL, NULL))) {
+    fprintf(stderr, "Can not create sws context\n");
+    goto fail;
+  }
+  *p_ctx = ctx;
+
+  return 0;
+
+fail:
+  if (ctx) {
+    scribe_decoder_ctx_free(&ctx);
+  }
+  fprintf(stderr, "failed\n");
+  assert(1 == 2);
+  return -1;
+}
+
+int main(int argc, char *argv[]) {
+  // av_log_set_level(AV_LOG_DEBUG);
+  scribe_decoder_ctx *ctx = NULL;
+  int err = 0;
+
+  if (argc != 3) {
+    fprintf(stderr, "Usage: %s <input file> <output directory>\n", argv[0]);
+    return -1;
+  }
+
+  if (scribe_decoder_ctx_init(&ctx, argv[1])) {
+    fprintf(stderr, "failed oto init decoder");
+    return -1;
+  }
+  printf("ptr: %p\n", (void *)ctx);
 
   /* actual decoding and dump the raw data */
-  while (ret >= 0) {
-    if ((ret = av_read_frame(input_ctx, packet)) < 0)
-      break;
-
-    if (video_stream == packet->stream_index)
-      ret = decode_write(decoder_ctx, packet);
-
-    av_packet_unref(packet);
+  FILE *f = NULL;
+  char buf[1024];
+  while (true) {
+    err = decode_to_buffer(ctx);
+    if (err == 1) {
+      printf("pts: %lld\n", ctx->yuv_frame->pts);
+      bzero(buf, sizeof(buf));
+      snprintf(buf, sizeof(buf), "%s/%lld.rgba", argv[2], ctx->yuv_frame->pts);
+      f = fopen(buf, "wb");
+      fwrite(ctx->buffer, ctx->buffer_size, 1, f);
+      fclose(f);
+      continue;
+    }
     break;
   }
 
-  /* flush the decoder */
-  ret = decode_write(decoder_ctx, NULL);
-
-  if (output_file)
-    fclose(output_file);
-  av_packet_free(&packet);
-  avcodec_free_context(&decoder_ctx);
-  avformat_close_input(&input_ctx);
-  // av_buffer_unref(&hw_device_ctx);
-
+  if (ctx) {
+    scribe_decoder_ctx_free(&ctx);
+  }
   return 0;
 }
