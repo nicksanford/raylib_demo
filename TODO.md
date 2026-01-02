@@ -2,5 +2,12 @@
 - [x] See if you can get raygui working
 - [x] Make cmd q work
 - [x] Render an image
-- [ ] Add ffmpeg
-- [ ] Feed video into ffmpeg, get frames out
+- [x] Add ffmpeg
+- [x] Feed video into ffmpeg, get frames out
+- [ ] Add play/pause
+- [ ] Add scrub
+- [ ] Add fit to monitor size GetMonitorWidth
+- [ ] Sync the view port size back to ffmpeg to determine the size of the buffer
+- [ ] Do something with shaders
+- [ ] Run though valgind to ensure no memory leaks
+- [ ] Change to use zig rather than c

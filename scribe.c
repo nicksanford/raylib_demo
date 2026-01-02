@@ -58,6 +58,9 @@ typedef struct scribe_decoder_ctx {
   AVFrame *rgba_frame;
   uint8_t *buffer;
   int buffer_size;
+  int fps;
+  int width;
+  int height;
 
   SwsContext *sws_ctx;
 } scribe_decoder_ctx;
@@ -295,6 +298,11 @@ int scribe_decoder_ctx_init(scribe_decoder_ctx **p_ctx, // OUT
     fprintf(stderr, "Can not create sws context\n");
     goto fail;
   }
+
+  ctx->fps = video->avg_frame_rate.num;
+  ctx->width = video->codecpar->width;
+  ctx->height = video->codecpar->height;
+
   *p_ctx = ctx;
 
   return 0;
@@ -320,13 +328,17 @@ int main(void) {
 
   InitWindow(windowWidth, windowHeight,
              "raylib [core] example - drop an image file");
+  SetWindowState(FLAG_WINDOW_RESIZABLE);
   const bstring filepath = bfromcstr("");
 
-  SetTargetFPS(60); // Set our game to run at 60 frames-per-second
+  int targetFPS = 60;
+  printf("GetScreenWidth: %d\n", GetScreenWidth());
+  printf("GetScreenHeight: %d\n", GetScreenHeight());
+  SetTargetFPS(targetFPS); // Set our game to run at 60 frames-per-second
   //--------------------------------------------------------------------------------------
   Texture2D texture = {0};
   Image image = {0};
-  scribe_decoder_ctx *video_cx = NULL;
+  scribe_decoder_ctx *video_ctx = NULL;
   int err = 0;
   // Detect window close button or ESC key
   while (!WindowShouldClose()) {
@@ -337,28 +349,35 @@ int main(void) {
       break;
     }
 
+    if (IsKeyPressed(KEY_T)) {
+      ToggleFullscreen();
+    }
+
     // when a file is dropped
     if (IsFileDropped()) {
       FilePathList droppedFiles = LoadDroppedFiles();
 
       if (droppedFiles.count > 0) {
-        if (video_cx) {
-          scribe_decoder_ctx_free(&video_cx);
+        if (video_ctx) {
+          scribe_decoder_ctx_free(&video_ctx);
         }
 
         assert(bassigncstr(filepath, droppedFiles.paths[0]) == BSTR_OK);
         fileProvided = true;
         if (IsFileExtension((const char *)filepath->data, ".mp4")) {
-          if (scribe_decoder_ctx_init(&video_cx, (char *)filepath->data)) {
+          if (scribe_decoder_ctx_init(&video_ctx, (char *)filepath->data)) {
             fprintf(stderr, "failed to init decoder");
             return -1;
           }
+          SetTargetFPS(targetFPS);
+          SetWindowSize(video_ctx->width, video_ctx->height);
         } else {
           if (IsTextureValid(texture)) {
             UnloadTexture(texture);
           }
 
           texture = LoadTexture((const char *)filepath->data);
+          SetWindowSize(texture.width, texture.height);
         }
       }
 
@@ -366,21 +385,21 @@ int main(void) {
     }
 
     // get next video frame if there is a video
-    if (video_cx) {
-      err = decode_to_buffer(video_cx);
+    if (video_ctx) {
+      err = decode_to_buffer(video_ctx);
       assert(err >= 0);
       if (err == 1) {
-
-        image.width = video_cx->rgba_frame->width;
-        image.height = video_cx->rgba_frame->height;
+        image.width = video_ctx->rgba_frame->width;
+        image.height = video_ctx->rgba_frame->height;
         image.mipmaps = 1;
         image.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
         // TODO: This might be dangerous
-        image.data = video_cx->buffer;
+        image.data = video_ctx->buffer;
+        // SetTargetFPS(video_ctx->fps);
         UnloadTexture(texture);
         texture = LoadTextureFromImage(image);
       } else {
-        scribe_decoder_ctx_free(&video_cx);
+        scribe_decoder_ctx_free(&video_ctx);
       }
     }
 
@@ -398,9 +417,9 @@ int main(void) {
       DrawText("Drop your file into this window.", 100, 60, 20, DARKGRAY);
     } else {
       // texture is valid
-      SetWindowSize(texture.width, texture.height);
       DrawTexture(texture, 0, 0, WHITE);
     }
+    DrawFPS(100, 100);
 
     EndDrawing();
   }
@@ -409,8 +428,8 @@ int main(void) {
 
   // De-Initialization
   assert(bdestroy(filepath) != BSTR_ERR);
-  if (video_cx) {
-    scribe_decoder_ctx_free(&video_cx);
+  if (video_ctx) {
+    scribe_decoder_ctx_free(&video_ctx);
   }
   return 0;
 }
