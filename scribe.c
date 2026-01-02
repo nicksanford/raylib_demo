@@ -24,8 +24,6 @@
 #include <bstrlib.h>
 #include <stdio.h>
 #include <stdlib.h> // Required for: calloc(), free()
-#define MAX_FILEPATH_SIZE 2048
-
 //------------------------------------------------------------------------------------
 // Program main entry point
 //------------------------------------------------------------------------------------

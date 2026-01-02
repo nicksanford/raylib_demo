@@ -11,6 +11,11 @@ BSTR_TARGET=build/lib/libbstr.a
 BSTR_SO_TARGET=$(patsubst %.a,%.so,$(BSTR_TARGET))
 RAYLIB_TARGET=build/lib/libraylib.a
 FFMPEG_TARGET=build/lib/libavcodec.a
+FFMPEG_LIBS=    libavformat \
+                libavcodec  \
+                libavutil   \
+                libswscale  
+
 
 SOURCE_OS ?= $(shell uname -s | tr '[:upper:]' '[:lower:]')
 ifeq ($(SOURCE_OS),linux)
@@ -31,6 +36,14 @@ endif
 .PHONY: scribe clean
 
 	
+main: LDFLAGS += -Ibuild/include -Lbuild/lib
+main: build $(BSTR_TARGET) $(RAYLIB_TARGET) $(FFMPEG_TARGET) main.c 
+	$(CC) -std=c23 -O1 $(CFLAGS) $(LDFLAGS) \
+		$(shell pkg-config --with-path=./build/lib/pkgconfig --libs-only-other $(FFMPEG_LIBS)) \
+		$(shell pkg-config --with-path=./build/lib/pkgconfig --libs-only-l $(FFMPEG_LIBS)) \
+		main.c \
+		-o $(BIN_OUTPUT_PATH)/main
+
 scribe: LDFLAGS += -Ibuild/include
 scribe: build $(BSTR_TARGET) $(RAYLIB_TARGET) $(FFMPEG_TARGET) scribe.c 
 	$(CC) -std=c23 -O1 $(CFLAGS) $(LDFLAGS) $(wildcard build/lib/*.a) scribe.c -o $(BIN_OUTPUT_PATH)/scribe
@@ -61,7 +74,6 @@ FFMPEG_CONFIG_OPTS = --prefix=../build \
 		--disable-shared \
 		--disable-programs \
 		--disable-doc \
-		--disable-everything \
 		--enable-static \
 		--enable-decoder=mpeg4 \
 		--enable-decoder=h264 \
