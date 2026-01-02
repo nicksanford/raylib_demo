@@ -34,7 +34,6 @@
 #include "libavcodec/codec.h"
 #include "libavcodec/packet.h"
 #include "libavutil/error.h"
-#include "libavutil/log.h"
 #include "libavutil/pixfmt.h"
 #include <assert.h>
 #include <stdbool.h>
@@ -55,14 +54,6 @@
 #define SCRIBE_SOURCE_PIX_FMT AV_PIX_FMT_YUV420P
 #define SCRIBE_TARGET_PIX_FMT AV_PIX_FMT_RGBA
 
-typedef struct Image {
-  void *data;  // Image raw data
-  int width;   // Image base width
-  int height;  // Image base height
-  int mipmaps; // Mipmap levels, 1 by default
-  int format;  // Data format (PixelFormat type)
-} Image;
-
 typedef struct scribe_decoder_ctx {
   AVFormatContext *input_ctx;
   int video_stream;
@@ -78,22 +69,6 @@ typedef struct scribe_decoder_ctx {
   SwsContext *sws_ctx;
 } scribe_decoder_ctx;
 
-// int convert_to_rgba(AVFrame *src, AVFrame *dst) {
-//   SwsContext *sws_ctx = sws_getContext(
-//       src->width, src->height, src->format, src->width, src->height,
-//       SCRIBE_TARGET_PIX_FMT, SWS_BILINEAR, NULL, NULL, NULL);
-//
-//   if (!sws_ctx) {
-//     return -1;
-//   }
-//
-//   int ret = sws_scale_frame(sws_ctx, dst, src);
-//
-//   sws_freeContext(sws_ctx);
-//
-//   return ret >= 0 ? 0 : -1;
-// }
-
 static enum AVPixelFormat get_format(AVCodecContext *ctx,
                                      const enum AVPixelFormat *pix_fmts) {
   const enum AVPixelFormat *p;
@@ -108,7 +83,7 @@ static enum AVPixelFormat get_format(AVCodecContext *ctx,
     }
   }
 
-  fprintf(stderr, "Failed to get HW surface format.\n");
+  fprintf(stderr, "Failed to get format.\n");
   return AV_PIX_FMT_NONE;
 }
 
@@ -173,13 +148,6 @@ static int decode_to_buffer(scribe_decoder_ctx *ctx) {
       fprintf(stderr, "Error while decoding, err: %s\n", av_err2str(err));
       return err;
     }
-    // otherwise err == 0 which is a success and we have a frame
-
-    // printf("frame format: %s\n",
-    //        av_get_pix_fmt_string(buf, sizeof(buf),
-    //        ctx->yuv_frame->format));
-    // bzero(buf, sizeof(buf));
-
     if ((err = sws_scale_frame(ctx->sws_ctx, ctx->rgba_frame, ctx->yuv_frame)) <
         0) {
       fprintf(stderr, "Error while converting from yuv420 to rgba: %s\n",
