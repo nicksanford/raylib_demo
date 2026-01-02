@@ -10,7 +10,7 @@ BSTR_HEADERS=$(wildcard bstrlib-1.0.0/*.h)
 BSTR_TARGET=build/lib/libbstr.a
 BSTR_SO_TARGET=$(patsubst %.a,%.so,$(BSTR_TARGET))
 RAYLIB_TARGET=build/lib/libraylib.a
-FFMPEG_TARGET=build/lib/libffmpeg.a
+FFMPEG_TARGET=build/lib/libavcodec.a
 
 SOURCE_OS ?= $(shell uname -s | tr '[:upper:]' '[:lower:]')
 ifeq ($(SOURCE_OS),linux)
@@ -30,23 +30,21 @@ endif
 
 .PHONY: scribe clean
 
-scribe: build $(BSTR_TARGET) $(RAYLIB_TARGET) scribe.c 
-	$(eval INCLUDES = $(wildcard build/include/*))
-	$(eval LDFLAGS += $(INCLUDES:%=-I%)	)
-	$(CC) -std=c23 -O1 $(CFLAGS) $(LDFLAGS) $(BSTR_TARGET) $(RAYLIB_TARGET) scribe.c -o $(BIN_OUTPUT_PATH)/scribe
+	
+scribe: LDFLAGS += -Ibuild/include
+scribe: build $(BSTR_TARGET) $(RAYLIB_TARGET) $(FFMPEG_TARGET) scribe.c 
+	$(CC) -std=c23 -O1 $(CFLAGS) $(LDFLAGS) $(wildcard build/lib/*.a) scribe.c -o $(BIN_OUTPUT_PATH)/scribe
 
 build:
 	git submodule update --init
-	@mkdir -p $(BIN_OUTPUT_PATH)
-	@mkdir -p build/include 
-	@mkdir -p build/lib
-	@mkdir -p build/share
-	@mkdir -p build/include/libbstrlib
-	@mkdir -p build/include/libraylib
+	mkdir -p $(BIN_OUTPUT_PATH)
+	mkdir -p build/include 
+	mkdir -p build/lib
+	mkdir -p build/share
 
 $(BSTR_TARGET): CFLAGS += -fPIC
 $(BSTR_TARGET): build $(BSTR_OBJECTS)
-	cp $(BSTR_HEADERS) ./build/include/libbstrlib/
+	cp $(BSTR_HEADERS) ./build/include
 	ar rcs $@ $(BSTR_OBJECTS)
 	ranlib $@
 
@@ -54,10 +52,9 @@ $(BSTR_SO_TARGET): $(BSTR_TARGET) $(BSTR_OBJECTS)
 	$(CC) -std=c23 -O1 $(CFLAGS) $(LDFLAGS) -shared -o $@ $(BSTR_OBJECTS)
 
 $(RAYLIB_TARGET): build 
-	cp raygui.h ./build/include/libraylib/
-	cp ./raylib/src/raylib.h ./build/include/libraylib/
-	cd raylib/src && MACOSX_DEPLOYMENT_TARGET=${MACOSX_DEPLOYMENT_TARGET} make 
-	cp ./raylib/src/libraylib.a ./build/lib
+	cp raygui.h ./raylib/src/raylib.h ./raylib/src/rlgl.h ./raylib/src/raymath.h ./build/include
+	cd raylib/src && MACOSX_DEPLOYMENT_TARGET=${MACOSX_DEPLOYMENT_TARGET} RAYLIB_RELEASE_PATH=$(abspath build/lib) make -j$(NPROC) 
+
 
 FFMPEG_CONFIG_OPTS = --prefix=../build \
 		--enable-gpl \
@@ -96,7 +93,7 @@ FFmpeg:
 	git submodule update --init
 
 clean:
-	@rm -rf bin build $(BSTR_OBJECTS) 
+	rm -rf bin build $(BSTR_OBJECTS) 
 	cd raylib/src && make clean 
 	cd FFmpeg && make clean
 

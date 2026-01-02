@@ -16,12 +16,12 @@
  *
  ********************************************************************************************/
 
-#include "raylib.h"
 #include <assert.h>
+#include <raylib.h>
 #define RAYGUI_IMPLEMENTATION
-#include "raygui.h"
+#include <raygui.h>
 
-#include "bstrlib-1.0.0/bstrlib.h"
+#include <bstrlib.h>
 #include <stdio.h>
 #include <stdlib.h> // Required for: calloc(), free()
 #define MAX_FILEPATH_SIZE 2048
