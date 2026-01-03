@@ -320,37 +320,51 @@ fail:
 // Program main entry point
 //------------------------------------------------------------------------------------
 int main(void) {
+  // STATE
+  //--------------------------------------------------------------------------------------
+  Image image = {0};
+  Texture2D texture = {0};
+  bool fileProvided = false;
+  bool pause = false;
+  const bstring filepath = bfromcstr("");
+  int err = 0;
+  int targetFPS = 60;
+  int windowWidth = 800;
+  int windowHeight = 450;
+  scribe_decoder_ctx *video_ctx = NULL;
   // Initialization
   //--------------------------------------------------------------------------------------
-  const int windowWidth = 800;
-  const int windowHeight = 450;
-  bool fileProvided = false;
-
+  // we need to init the window first in order to get the monitor dimensions
   InitWindow(windowWidth, windowHeight,
              "raylib [core] example - drop an image file");
+  windowWidth = GetMonitorWidth(0) / 2;
+  windowHeight = GetMonitorHeight(0) / 2;
+  SetWindowSize(windowWidth, windowHeight);
   SetWindowState(FLAG_WINDOW_RESIZABLE);
-  const bstring filepath = bfromcstr("");
+  printf("GetScreenWidth: %d, GetScreenHeight: %d\n", GetScreenWidth(),
+         GetScreenHeight());
 
-  int targetFPS = 60;
-  printf("GetScreenWidth: %d\n", GetScreenWidth());
-  printf("GetScreenHeight: %d\n", GetScreenHeight());
   SetTargetFPS(targetFPS); // Set our game to run at 60 frames-per-second
   //--------------------------------------------------------------------------------------
-  Texture2D texture = {0};
-  Image image = {0};
-  scribe_decoder_ctx *video_ctx = NULL;
-  int err = 0;
   // Detect window close button or ESC key
   while (!WindowShouldClose()) {
     // Update
     //----------------------------------------------------------------------------------
-    if (IsKeyPressed(KEY_Q) &&
-        (IsKeyPressed(KEY_LEFT_SUPER) || IsKeyPressed(KEY_RIGHT_SUPER))) {
-      break;
+    if (IsWindowResized()) {
+      printf("GetScreenWidth: %d, GetScreenHeight: %d\n", GetScreenWidth(),
+             GetScreenHeight());
+      windowWidth = GetScreenWidth();
+      windowHeight = GetScreenHeight();
     }
 
-    if (IsKeyPressed(KEY_T)) {
+    if (IsKeyPressed(KEY_SPACE)) {
+      pause = !pause;
+    }
+
+    if (IsKeyPressed(KEY_F)) {
       ToggleFullscreen();
+      windowWidth = GetScreenWidth();
+      windowHeight = GetScreenHeight();
     }
 
     // when a file is dropped
@@ -385,7 +399,7 @@ int main(void) {
     }
 
     // get next video frame if there is a video
-    if (video_ctx) {
+    if (video_ctx && !pause) {
       err = decode_to_buffer(video_ctx);
       assert(err >= 0);
       if (err == 1) {

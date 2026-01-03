@@ -4,10 +4,10 @@
 - [x] Render an image
 - [x] Add ffmpeg
 - [x] Feed video into ffmpeg, get frames out
-- [ ] Add play/pause
-- [ ] Add scrub
-- [ ] Add fit to monitor size GetMonitorWidth
+- [x] Add play/pause
+- [x] Add fit to monitor size GetMonitorWidth
 - [ ] Sync the view port size back to ffmpeg to determine the size of the buffer
+- [ ] Change to use zig rather than c
+- [ ] Add scrub
 - [ ] Do something with shaders
 - [ ] Run though valgind to ensure no memory leaks
-- [ ] Change to use zig rather than c
