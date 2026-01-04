@@ -16,6 +16,7 @@
  *
  ********************************************************************************************/
 
+#include "libavutil/log.h"
 #include "raylib/src/raylib.h"
 #include <assert.h>
 #include <raylib.h>
@@ -58,9 +59,11 @@ typedef struct scribe_decoder_ctx {
   AVFrame *rgba_frame;
   uint8_t *buffer;
   int buffer_size;
-  int fps;
-  int width;
-  int height;
+  int buffer_width;
+  int buffer_height;
+  int video_width;
+  int video_height;
+  int video_fps;
 
   SwsContext *sws_ctx;
 } scribe_decoder_ctx;
@@ -68,12 +71,12 @@ typedef struct scribe_decoder_ctx {
 static enum AVPixelFormat get_format(AVCodecContext *ctx,
                                      const enum AVPixelFormat *pix_fmts) {
   const enum AVPixelFormat *p;
-  char str[255] = {0};
+  // char str[255] = {0};
 
   for (p = pix_fmts; *p != -1; p++) {
-    av_get_pix_fmt_string(str, sizeof(str), *p);
-    printf("option: %s\n", str);
-    bzero(str, sizeof(str));
+    // av_get_pix_fmt_string(str, sizeof(str), *p);
+    // printf("option: %s\n", str);
+    // bzero(str, sizeof(str));
     if (*p == SCRIBE_SOURCE_PIX_FMT) {
       return *p;
     }
@@ -81,6 +84,47 @@ static enum AVPixelFormat get_format(AVCodecContext *ctx,
 
   fprintf(stderr, "Failed to get format.\n");
   return AV_PIX_FMT_NONE;
+}
+
+void scale_down_aspect_ratio_to_fit_window(int *out_width, int *out_height,
+                                           int src_width, int src_height,
+                                           int window_width,
+                                           int window_height) {
+  if (src_width <= window_width && src_height <= window_height) {
+    // no need to scale as the window is greater in both
+    // dimensions
+    *out_width = src_width;
+    *out_height = src_height;
+    return;
+  }
+
+  float src_aspect_ratio = ((float)src_width / src_height);
+  float window_aspect_ratio = ((float)window_width / window_height);
+  int tmp_out_width = 0;
+  int tmp_out_height = 0;
+  if (src_width >= src_height) {
+    // horizontal
+    if (src_aspect_ratio >= window_aspect_ratio) {
+      tmp_out_width = window_width;
+      tmp_out_height = window_width * ((float)src_height / src_width);
+    } else {
+      tmp_out_width = window_height * ((float)src_width / src_height);
+      tmp_out_height = window_height;
+    }
+
+    if (tmp_out_width % 2 != 0) {
+      tmp_out_width--;
+    }
+    if (tmp_out_height % 2 != 0) {
+      tmp_out_height--;
+    }
+  } else {
+    // TODO: vertical video unimplemented
+    assert(false);
+  }
+  *out_width = tmp_out_width;
+  *out_height = tmp_out_height;
+  return;
 }
 
 /**
@@ -92,9 +136,40 @@ static enum AVPixelFormat get_format(AVCodecContext *ctx,
  *
  * returns other negative number on unrecoverable error
  **/
-static int decode_to_buffer(scribe_decoder_ctx *ctx) {
+static int decode_to_buffer(scribe_decoder_ctx *ctx, int width, int height) {
   int err = 0;
-  // char buf[3000] = {0};
+  if (ctx->buffer_width != width || ctx->buffer_height != height) {
+    int out_width = 0;
+    int out_height = 0;
+    scale_down_aspect_ratio_to_fit_window(&out_width, &out_height,
+                                          ctx->video_width, ctx->video_height,
+                                          width, height);
+
+    if (ctx->sws_ctx) {
+      sws_freeContext(ctx->sws_ctx);
+    }
+    if (!(ctx->sws_ctx = sws_getContext(ctx->video_width, ctx->video_height,
+                                        SCRIBE_SOURCE_PIX_FMT, out_width,
+                                        out_height, SCRIBE_TARGET_PIX_FMT,
+                                        SWS_FAST_BILINEAR, NULL, NULL, NULL))) {
+      fprintf(stderr, "Failed to allocate new context, width: %d, height: %d\n",
+              out_width, out_height);
+      return -1;
+    };
+    ctx->buffer_width = width;
+    ctx->buffer_height = height;
+    if (ctx->rgba_frame) {
+      av_frame_free(&ctx->rgba_frame);
+    }
+    if (ctx->yuv_frame) {
+      av_frame_free(&ctx->yuv_frame);
+    }
+    if (!(ctx->yuv_frame = av_frame_alloc()) ||
+        !(ctx->rgba_frame = av_frame_alloc())) {
+      fprintf(stderr, "Can not alloc frame\n");
+      return -1;
+    }
+  }
   while (1) {
     if ((err = av_read_frame(ctx->input_ctx, ctx->packet)) < 0) {
       fprintf(stderr, "Failed to read frame, err: %s\n", av_err2str(err));
@@ -104,24 +179,6 @@ static int decode_to_buffer(scribe_decoder_ctx *ctx) {
     if (ctx->video_stream != ctx->packet->stream_index) {
       continue;
     }
-
-    // printf("\n");
-    // printf("\n");
-    // printf("-----------\n");
-    // printf("ctx->video_stream: %d ctx->packet->stream_index: %d, pts %lld, "
-    //        "pos: %lld, flags: %d\n",
-    //        ctx->video_stream, ctx->packet->stream_index, ctx->packet->pts,
-    //        ctx->packet->pos, ctx->packet->flags);
-    // AVStream *video = ctx->input_ctx->streams[ctx->video_stream];
-    // printf("video_index: %d\n", video->index);
-    // printf("video_id: %d\n", video->id);
-    // printf("avg_frame_rate: %d/%d\n", video->avg_frame_rate.num,
-    //        video->avg_frame_rate.den);
-    // printf("duration: %lld\n", video->duration);
-    // printf("width: %d, height: %d, codec_id: %d, format: %d\n",
-    //        video->codecpar->width, video->codecpar->height,
-    //        video->codecpar->codec_id, video->codecpar->format);
-    // printf("-----------\n");
 
     if ((err = avcodec_send_packet(ctx->decoder_ctx, ctx->packet)) < 0) {
       fprintf(stderr, "Error decoding packet: err: %s\n", av_err2str(err));
@@ -204,7 +261,7 @@ scribe_decoder_ctx *scribe_decoder_ctx_alloc(void) {
 }
 
 int scribe_decoder_ctx_init(scribe_decoder_ctx **p_ctx, // OUT
-                            char *filename) {
+                            char *filename, int width, int height) {
   scribe_decoder_ctx *ctx = *p_ctx;
   int err = 0;
   AVStream *video = NULL;
@@ -239,7 +296,7 @@ int scribe_decoder_ctx_init(scribe_decoder_ctx **p_ctx, // OUT
     goto fail;
   }
   ctx->video_stream = err;
-  printf("best stream: %d\n", ctx->video_stream);
+  // printf("best stream: %d\n", ctx->video_stream);
 
   if (!(ctx->decoder_ctx = avcodec_alloc_context3(decoder))) {
     fprintf(stderr, "Cannot allocate decoder context\n");
@@ -255,7 +312,6 @@ int scribe_decoder_ctx_init(scribe_decoder_ctx **p_ctx, // OUT
   printf("width: %d, height: %d, codec_id: %d, format: %d\n",
          video->codecpar->width, video->codecpar->height,
          video->codecpar->codec_id, video->codecpar->format);
-  // exit(1);
   if ((err = avcodec_parameters_to_context(ctx->decoder_ctx, video->codecpar)) <
       0) {
     fprintf(stderr, "Cannot get codec parameters from decoder context: %s\n",
@@ -290,18 +346,25 @@ int scribe_decoder_ctx_init(scribe_decoder_ctx **p_ctx, // OUT
     goto fail;
   }
 
-  if (!(ctx->sws_ctx =
-            sws_getContext(video->codecpar->width, video->codecpar->height,
-                           SCRIBE_SOURCE_PIX_FMT, video->codecpar->width,
-                           video->codecpar->height, SCRIBE_TARGET_PIX_FMT,
-                           SWS_BILINEAR, NULL, NULL, NULL))) {
+  int out_width = 0;
+  int out_height = 0;
+  scale_down_aspect_ratio_to_fit_window(&out_width, &out_height,
+                                        video->codecpar->width,
+                                        video->codecpar->height, width, height);
+
+  if (!(ctx->sws_ctx = sws_getContext(
+            video->codecpar->width, video->codecpar->height,
+            SCRIBE_SOURCE_PIX_FMT, out_width, out_height, SCRIBE_TARGET_PIX_FMT,
+            SWS_FAST_BILINEAR, NULL, NULL, NULL))) {
     fprintf(stderr, "Can not create sws context\n");
     goto fail;
   }
 
-  ctx->fps = video->avg_frame_rate.num;
-  ctx->width = video->codecpar->width;
-  ctx->height = video->codecpar->height;
+  ctx->buffer_width = width;
+  ctx->buffer_height = height;
+  ctx->video_width = video->codecpar->width;
+  ctx->video_height = video->codecpar->height;
+  ctx->video_fps = video->avg_frame_rate.num;
 
   *p_ctx = ctx;
 
@@ -311,7 +374,6 @@ fail:
   if (ctx) {
     scribe_decoder_ctx_free(&ctx);
   }
-  fprintf(stderr, "failed\n");
   assert(1 == 2);
   return -1;
 }
@@ -322,6 +384,7 @@ fail:
 int main(void) {
   // STATE
   //--------------------------------------------------------------------------------------
+  // av_log_set_level(AV_LOG_DEBUG);
   Image image = {0};
   Texture2D texture = {0};
   bool fileProvided = false;
@@ -341,9 +404,6 @@ int main(void) {
   windowHeight = GetMonitorHeight(0) / 2;
   SetWindowSize(windowWidth, windowHeight);
   SetWindowState(FLAG_WINDOW_RESIZABLE);
-  printf("GetScreenWidth: %d, GetScreenHeight: %d\n", GetScreenWidth(),
-         GetScreenHeight());
-
   SetTargetFPS(targetFPS); // Set our game to run at 60 frames-per-second
   //--------------------------------------------------------------------------------------
   // Detect window close button or ESC key
@@ -351,8 +411,6 @@ int main(void) {
     // Update
     //----------------------------------------------------------------------------------
     if (IsWindowResized()) {
-      printf("GetScreenWidth: %d, GetScreenHeight: %d\n", GetScreenWidth(),
-             GetScreenHeight());
       windowWidth = GetScreenWidth();
       windowHeight = GetScreenHeight();
     }
@@ -361,7 +419,7 @@ int main(void) {
       pause = !pause;
     }
 
-    if (IsKeyPressed(KEY_F)) {
+    if (IsKeyPressed(KEY_T)) {
       ToggleFullscreen();
       windowWidth = GetScreenWidth();
       windowHeight = GetScreenHeight();
@@ -379,12 +437,13 @@ int main(void) {
         assert(bassigncstr(filepath, droppedFiles.paths[0]) == BSTR_OK);
         fileProvided = true;
         if (IsFileExtension((const char *)filepath->data, ".mp4")) {
-          if (scribe_decoder_ctx_init(&video_ctx, (char *)filepath->data)) {
+          if (scribe_decoder_ctx_init(&video_ctx, (char *)filepath->data,
+                                      windowWidth, windowHeight)) {
             fprintf(stderr, "failed to init decoder");
             return -1;
           }
           SetTargetFPS(targetFPS);
-          SetWindowSize(video_ctx->width, video_ctx->height);
+          SetWindowSize(video_ctx->buffer_width, video_ctx->buffer_height);
         } else {
           if (IsTextureValid(texture)) {
             UnloadTexture(texture);
@@ -400,7 +459,7 @@ int main(void) {
 
     // get next video frame if there is a video
     if (video_ctx && !pause) {
-      err = decode_to_buffer(video_ctx);
+      err = decode_to_buffer(video_ctx, windowWidth, windowHeight);
       assert(err >= 0);
       if (err == 1) {
         image.width = video_ctx->rgba_frame->width;
@@ -409,7 +468,6 @@ int main(void) {
         image.format = PIXELFORMAT_UNCOMPRESSED_R8G8B8A8;
         // TODO: This might be dangerous
         image.data = video_ctx->buffer;
-        // SetTargetFPS(video_ctx->fps);
         UnloadTexture(texture);
         texture = LoadTextureFromImage(image);
       } else {
